@@ -30,7 +30,7 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
     try:
         # Prepare the prompt with the row data
         prompt = f"""
-        Please generate a comprehensive company analysis report in the exact following format based on the data provided below:
+        Please Summarize where List mentioned and generate a comprehensive company analysis report in the exact following format based on the data provided below:
         [Prospect Name] - [Company Name]
         
         [Company Name] - Company Brief
