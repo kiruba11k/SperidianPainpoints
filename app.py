@@ -30,44 +30,56 @@ def extract_row_data(row):
     """Extract and clean data from the row for better processing"""
     data = {}
     
-    # Basic company info
-    data['prospect_name'] = row.get('Prospect Name', '')
-    data['prospect_designation'] = row.get('Prospect Designation', '')
-    data['company_name'] = row.get('Company Name', '')
-    data['industry'] = row.get('Industry', '')
-    data['headquarters'] = row.get('Headquarters Country', '')
-    data['employees'] = row.get('Company Size (Employees)', '')
-    data['revenue'] = row.get('Revenue (Approx.)', '')
-    data['sub_industry'] = row.get('Sub-Industry', '')
-    
-    # Technology stack
-    data['crm'] = row.get('Uses CRM (Salesforce/Dynamics)', '')
-    data['core_banking'] = row.get('Uses Core Banking System', '')
-    data['los'] = row.get('Uses Loan Origination System (LOS)', '')
-    data['ai_tools'] = row.get('Uses AI tools', '')
-    data['rpa_tools'] = row.get('Uses RPA Tools', '')
-    data['automation_loan_servicing'] = row.get('AI or Automation in Loan Servicing?', '')
-    data['compliance_systems'] = row.get('Compliance Systems in Use for lending and morgage industry', '')
-    
-    # Initiatives and activities
-    data['digital_initiative'] = row.get('Digital Transformation Initiative', '')
-    data['branch_expansion'] = row.get('Branch Expansion', '')
-    data['ma_activity'] = row.get('M&A Activity', '')
-    
-    # Pain points and relevance
-    data['pain_points'] = row.get('Pain Point', '')
-    data['relevance'] = row.get('Relevance for Speridian?', '')
-    data['relevance_reason'] = row.get('Reason', '')  # This might need adjustment based on your CSV structure
-    
-    # Clean up the data
-    for key in data:
-        if pd.isna(data[key]):
-            data[key] = ''
-        elif isinstance(data[key], str):
-            # Remove any markdown formatting or unwanted prefixes
-            data[key] = re.sub(r'^.*?:', '', data[key]).strip()
+    # Extract all data from the row
+    for col in row.index:
+        value = row[col]
+        if pd.isna(value):
+            data[col] = ''
+        else:
+            data[col] = str(value)
     
     return data
+
+# Function to generate a dynamic prompt based on available data
+def create_dynamic_prompt(row_data):
+    """Create a dynamic prompt based on the available data in the row"""
+    
+    # Start with the basic structure
+    prompt_parts = [
+        "Please generate a comprehensive company analysis report in the following format:",
+        "",
+        "[Prospect Name] - [Company Name]",
+        "",
+        "[Company Name] - Company Brief",
+        "Industry: [Industry]",
+        "Headquarters: [Headquarters]",
+        "Employees: [Employee Count]",
+        "Revenue: [Revenue]",
+        "Recent Initiatives:",
+        "[List recent initiatives]",
+        "",
+        "Technology Stack:",
+        "[List technology systems]",
+        "",
+        "Focus Areas: [List focus areas]",
+        "",
+        "Pain Points:",
+        "[List pain points]",
+        "",
+        "Use the following data to create the report:",
+        json.dumps(row_data, indent=2),
+        "",
+        "IMPORTANT:",
+        "- Use only the information provided in the data",
+        "- Do not make recommendations in any section",
+        "- For Pain Points, use exactly the information from the provided data",
+        "- Keep the report professional and concise",
+        "- Format with bullet points for lists where appropriate",
+        "- If certain information is not available, omit that section",
+        "- Focus on the most relevant information for a sales call"
+    ]
+    
+    return "\n".join(prompt_parts)
 
 # Function to generate report using Groq
 def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versatile"):
@@ -75,38 +87,8 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
     Generate a company analysis report using Groq AI model
     """
     try:
-        # Prepare the prompt with specific instructions
-        prompt = f"""
-        Please generate a comprehensive company analysis report in the exact following format based on the data provided below:
-
-        {row_data['prospect_name']} - {row_data['company_name']}
-
-        {row_data['company_name']} - Company Brief
-        Industry: {row_data['industry']} / {row_data['sub_industry']}
-        Headquarters: {row_data['headquarters']}
-        Employees: {row_data['employees']}
-        Revenue: {row_data['revenue']}
-        Recent Initiatives:
-        • {row_data['ma_activity'] if row_data['ma_activity'] else 'No recent initiatives found'}
-
-        Technology Stack:
-        Loan Origination & Servicing: {row_data['los']}
-        CRM: {row_data['crm']}
-        Automation / AI: {"No dedicated AI or RPA tools detected" if row_data['ai_tools'] == 'No AI tools identified' and row_data['rpa_tools'] == 'No RPA tools' else f"{row_data['ai_tools']}, {row_data['rpa_tools']}"}
-        Compliance & Security: {row_data['compliance_systems']}
-
-        Focus Areas: Digital lending operations, loan processing efficiency, compliance, customer experience{", post-merger integration" if row_data['ma_activity'] else ""}
-
-        Pain Points Relevant to {row_data['prospect_name']}:
-        • {row_data['pain_points'].replace('→', '-').replace('. ', '.\n• ')}
-
-        IMPORTANT: 
-        - Use only the information provided above
-        - Do not make recommendations in any section
-        - For Pain Points, use exactly the information from the provided data
-        - Keep the report professional and concise
-        - Format with bullet points for lists
-        """
+        # Create a dynamic prompt based on the available data
+        prompt = create_dynamic_prompt(row_data)
         
         # Create chat completion
         chat_completion = client.chat.completions.create(
@@ -117,7 +99,7 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
                 }
             ],
             model=model_name,
-            temperature=0.1,  # Very low temperature for factual responses
+            temperature=0.2,  # Low temperature for factual responses
             max_tokens=4000,
         )
         
@@ -139,6 +121,39 @@ def create_download_link(data, filename, file_type):
     href = f'<a href="data:file/{file_type};base64,{b64}" download="{filename}">Download {filename}</a>'
     return href
 
+# Function to analyze CSV structure and suggest mappings
+def analyze_csv_structure(df):
+    """Analyze the CSV structure and suggest column mappings"""
+    st.subheader("CSV Structure Analysis")
+    
+    # Find potential columns for key information
+    prospect_cols = [col for col in df.columns if 'prospect' in col.lower() or 'name' in col.lower()]
+    company_cols = [col for col in df.columns if 'company' in col.lower()]
+    industry_cols = [col for col in df.columns if 'industry' in col.lower()]
+    employee_cols = [col for col in df.columns if 'employee' in col.lower() or 'size' in col.lower()]
+    revenue_cols = [col for col in df.columns if 'revenue' in col.lower()]
+    tech_cols = [col for col in df.columns if any(word in col.lower() for word in ['crm', 'system', 'tech', 'software', 'tool'])]
+    pain_point_cols = [col for col in df.columns if 'pain' in col.lower() or 'challenge' in col.lower()]
+    
+    st.write("Detected columns for:")
+    st.write(f"- Prospect information: {', '.join(prospect_cols) if prospect_cols else 'None found'}")
+    st.write(f"- Company information: {', '.join(company_cols) if company_cols else 'None found'}")
+    st.write(f"- Industry: {', '.join(industry_cols) if industry_cols else 'None found'}")
+    st.write(f"- Employee count: {', '.join(employee_cols) if employee_cols else 'None found'}")
+    st.write(f"- Revenue: {', '.join(revenue_cols) if revenue_cols else 'None found'}")
+    st.write(f"- Technology: {', '.join(tech_cols) if tech_cols else 'None found'}")
+    st.write(f"- Pain points: {', '.join(pain_point_cols) if pain_point_cols else 'None found'}")
+    
+    return {
+        'prospect_cols': prospect_cols,
+        'company_cols': company_cols,
+        'industry_cols': industry_cols,
+        'employee_cols': employee_cols,
+        'revenue_cols': revenue_cols,
+        'tech_cols': tech_cols,
+        'pain_point_cols': pain_point_cols
+    }
+
 # Main application
 def main():
     st.title("Speridian Tele Script Generator")
@@ -153,6 +168,8 @@ def main():
         st.session_state.reports = {}
     if 'groq_client' not in st.session_state:
         st.session_state.groq_client = initialize_groq_client()
+    if 'column_mapping' not in st.session_state:
+        st.session_state.column_mapping = {}
     
     # Sidebar for file upload
     with st.sidebar:
@@ -168,7 +185,7 @@ def main():
         uploaded_file = st.file_uploader(
             "Upload CSV file", 
             type=['csv'],
-            help="Ensure your CSV contains columns like 'Company Name', 'Prospect Name', etc."
+            help="Upload a CSV file with company and prospect data"
         )
         
         if uploaded_file is not None:
@@ -179,6 +196,9 @@ def main():
                 st.session_state.current_index = 0  # Reset to first record
                 
                 st.success(f"✅ Successfully uploaded {len(st.session_state.df)} records")
+                
+                # Analyze CSV structure
+                st.session_state.column_mapping = analyze_csv_structure(st.session_state.df)
                 
                 # Show dataframe info
                 st.subheader("Data Preview")
@@ -220,15 +240,29 @@ def main():
         # Get current row data
         current_row = st.session_state.df.iloc[st.session_state.current_index]
         row_data = extract_row_data(current_row)
-        company_name = row_data.get('company_name', 'Unknown Company')
-        prospect_name = row_data.get('prospect_name', 'Unknown Prospect')
         
-        st.header(f"Analysis for: {company_name}")
-        st.subheader(f"Prospect: {prospect_name}")
+        # Try to extract company and prospect names
+        company_name = ""
+        prospect_name = ""
+        
+        # Try to find company name
+        for col in st.session_state.column_mapping.get('company_cols', []):
+            if col in row_data and row_data[col]:
+                company_name = row_data[col]
+                break
+        
+        # Try to find prospect name
+        for col in st.session_state.column_mapping.get('prospect_cols', []):
+            if col in row_data and row_data[col] and 'name' in col.lower():
+                prospect_name = row_data[col]
+                break
+        
+        st.header(f"Analysis for: {company_name if company_name else 'Unknown Company'}")
+        st.subheader(f"Prospect: {prospect_name if prospect_name else 'Unknown Prospect'}")
         
         # Display raw data
         with st.expander("View Raw Data"):
-            st.json(current_row.to_dict())
+            st.json(row_data)
         
         # Check if report already exists for this index
         if st.session_state.current_index not in st.session_state.reports:
@@ -266,7 +300,7 @@ def main():
             st.download_button(
                 label="Download Current Report",
                 data=report_text,
-                file_name=f"{company_name.replace(' ', '_')}_report.txt",
+                file_name=f"{company_name.replace(' ', '_') if company_name else 'company'}_report.txt",
                 mime="text/plain"
             )
         with col2:
