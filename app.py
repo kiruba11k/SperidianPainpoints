@@ -7,6 +7,7 @@ import io
 from groq import Groq
 import pyperclip  # For copy to clipboard functionality
 
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 # Set page configuration
 st.set_page_config(
     page_title="Tele Script Generator",
@@ -16,7 +17,7 @@ st.set_page_config(
 
 # Initialize Groq client
 def initialize_groq_client():
-    api_key = st.sidebar.text_input("Enter your Groq API key:", type="password")
+    api_key = GROQ_API_KEY
     if api_key:
         return Groq(api_key=api_key)
     return None
