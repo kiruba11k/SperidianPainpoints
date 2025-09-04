@@ -23,7 +23,7 @@ def initialize_groq_client():
     return None
 
 # Function to generate report using Groq
-def generate_report_with_groq(client, row_data, model_name="mixtral-8x7b-32768"):
+def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versatile"):
     """
     Generate a company analysis report using Groq AI model
     """
