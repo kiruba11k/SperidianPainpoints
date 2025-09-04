@@ -2,11 +2,9 @@ import streamlit as st
 import pandas as pd
 import json
 import time
-import csv
-import io
+import re
 from groq import Groq
 import base64
-from datetime import datetime
 
 # Set page configuration
 st.set_page_config(
@@ -27,6 +25,50 @@ def initialize_groq_client():
         st.error(f"Error initializing Groq client: {str(e)}")
         return None
 
+# Function to clean and extract data from the row
+def extract_row_data(row):
+    """Extract and clean data from the row for better processing"""
+    data = {}
+    
+    # Basic company info
+    data['prospect_name'] = row.get('Prospect Name', '')
+    data['prospect_designation'] = row.get('Prospect Designation', '')
+    data['company_name'] = row.get('Company Name', '')
+    data['industry'] = row.get('Industry', '')
+    data['headquarters'] = row.get('Headquarters Country', '')
+    data['employees'] = row.get('Company Size (Employees)', '')
+    data['revenue'] = row.get('Revenue (Approx.)', '')
+    data['sub_industry'] = row.get('Sub-Industry', '')
+    
+    # Technology stack
+    data['crm'] = row.get('Uses CRM (Salesforce/Dynamics)', '')
+    data['core_banking'] = row.get('Uses Core Banking System', '')
+    data['los'] = row.get('Uses Loan Origination System (LOS)', '')
+    data['ai_tools'] = row.get('Uses AI tools', '')
+    data['rpa_tools'] = row.get('Uses RPA Tools', '')
+    data['automation_loan_servicing'] = row.get('AI or Automation in Loan Servicing?', '')
+    data['compliance_systems'] = row.get('Compliance Systems in Use for lending and morgage industry', '')
+    
+    # Initiatives and activities
+    data['digital_initiative'] = row.get('Digital Transformation Initiative', '')
+    data['branch_expansion'] = row.get('Branch Expansion', '')
+    data['ma_activity'] = row.get('M&A Activity', '')
+    
+    # Pain points and relevance
+    data['pain_points'] = row.get('Pain Point', '')
+    data['relevance'] = row.get('Relevance for Speridian?', '')
+    data['relevance_reason'] = row.get('Reason', '')  # This might need adjustment based on your CSV structure
+    
+    # Clean up the data
+    for key in data:
+        if pd.isna(data[key]):
+            data[key] = ''
+        elif isinstance(data[key], str):
+            # Remove any markdown formatting or unwanted prefixes
+            data[key] = re.sub(r'^.*?:', '', data[key]).strip()
+    
+    return data
+
 # Function to generate report using Groq
 def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versatile"):
     """
@@ -37,40 +79,33 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
         prompt = f"""
         Please generate a comprehensive company analysis report in the exact following format based on the data provided below:
 
-        [Prospect Name] - [Company Name]
+        {row_data['prospect_name']} - {row_data['company_name']}
 
-        [Company Name] - Company Brief
-        Industry: [Industry]
-        Headquarters: [Headquarters]
-        Employees: [Employee Count]
-        Revenue: [Revenue]
+        {row_data['company_name']} - Company Brief
+        Industry: {row_data['industry']} / {row_data['sub_industry']}
+        Headquarters: {row_data['headquarters']}
+        Employees: {row_data['employees']}
+        Revenue: {row_data['revenue']}
         Recent Initiatives:
-        • [List recent initiatives as bullet points, only include what's in the data]
+        • {row_data['ma_activity'] if row_data['ma_activity'] else 'No recent initiatives found'}
 
         Technology Stack:
-        Loan Origination & Servicing: [List systems]
-        CRM: [CRM systems]
-        Automation / AI: [AI/RPA tools]
-        Compliance & Security: [Security systems]
+        Loan Origination & Servicing: {row_data['los']}
+        CRM: {row_data['crm']}
+        Automation / AI: {"No dedicated AI or RPA tools detected" if row_data['ai_tools'] == 'No AI tools identified' and row_data['rpa_tools'] == 'No RPA tools' else f"{row_data['ai_tools']}, {row_data['rpa_tools']}"}
+        Compliance & Security: {row_data['compliance_systems']}
 
-        Focus Areas: [List the company's actual focus areas based on data, not recommendations]
+        Focus Areas: Digital lending operations, loan processing efficiency, compliance, customer experience{", post-merger integration" if row_data['ma_activity'] else ""}
 
-        Pain Points Relevant to [Prospect Name]:
-        • [Pain point 1 - be specific and reference the data]
-        • [Pain point 2 - be specific and reference the data]
-        • [Pain point 3 - be specific and reference the data]
-        • [Pain point 4 - be specific and reference the data]
-        • [Pain point 5 - be specific and reference the data]
+        Pain Points Relevant to {row_data['prospect_name']}:
+        • {row_data['pain_points'].replace('→', '-').replace('. ', '.\n• ')}
 
         IMPORTANT: 
-        - Use only the information provided in the data
-        - Do not make recommendations in the Focus Areas or Pain Points sections
-        - For Pain Points, be specific and reference the actual challenges the company faces based on the data
-        - Use bullet points for lists
+        - Use only the information provided above
+        - Do not make recommendations in any section
+        - For Pain Points, use exactly the information from the provided data
         - Keep the report professional and concise
-
-        Here is the data to use:
-        {json.dumps(row_data, indent=2)}
+        - Format with bullet points for lists
         """
         
         # Create chat completion
@@ -82,7 +117,7 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
                 }
             ],
             model=model_name,
-            temperature=0.2,  # Lower temperature for more factual responses
+            temperature=0.1,  # Very low temperature for factual responses
             max_tokens=4000,
         )
         
@@ -124,9 +159,9 @@ def main():
         st.header("Configuration")
         
         if st.session_state.groq_client:
-            st.success("Groq API connected successfully")
+            st.success("✅ Groq API connected successfully")
         else:
-            st.error(" Groq API not connected")
+            st.error("❌ Groq API not connected")
         
         st.divider()
         
@@ -143,7 +178,7 @@ def main():
                 st.session_state.reports = {}  # Reset reports when new file is uploaded
                 st.session_state.current_index = 0  # Reset to first record
                 
-                st.success(f" Successfully uploaded {len(st.session_state.df)} records")
+                st.success(f"✅ Successfully uploaded {len(st.session_state.df)} records")
                 
                 # Show dataframe info
                 st.subheader("Data Preview")
@@ -175,8 +210,8 @@ def main():
                 with st.spinner(f"Generating {len(st.session_state.df)} reports. This may take a while..."):
                     for idx in range(len(st.session_state.df)):
                         if idx not in st.session_state.reports:
-                            row_dict = st.session_state.df.iloc[idx].to_dict()
-                            report = generate_report_with_groq(st.session_state.groq_client, row_dict)
+                            row_data = extract_row_data(st.session_state.df.iloc[idx])
+                            report = generate_report_with_groq(st.session_state.groq_client, row_data)
                             if report:
                                 st.session_state.reports[idx] = report
                             time.sleep(1)  # Rate limiting
@@ -184,8 +219,9 @@ def main():
         
         # Get current row data
         current_row = st.session_state.df.iloc[st.session_state.current_index]
-        company_name = current_row.get('Company Name', 'Unknown Company')
-        prospect_name = current_row.get('Prospect Name', 'Unknown Prospect')
+        row_data = extract_row_data(current_row)
+        company_name = row_data.get('company_name', 'Unknown Company')
+        prospect_name = row_data.get('prospect_name', 'Unknown Prospect')
         
         st.header(f"Analysis for: {company_name}")
         st.subheader(f"Prospect: {prospect_name}")
@@ -198,11 +234,8 @@ def main():
         if st.session_state.current_index not in st.session_state.reports:
             # Generate new report
             with st.spinner("Generating AI analysis... This may take a moment"):
-                # Convert row to dictionary for processing
-                row_dict = current_row.to_dict()
-                
                 # Generate report
-                report = generate_report_with_groq(st.session_state.groq_client, row_dict)
+                report = generate_report_with_groq(st.session_state.groq_client, row_data)
                 
                 if report:
                     st.session_state.reports[st.session_state.current_index] = report
