@@ -5,21 +5,27 @@ import time
 import csv
 import io
 from groq import Groq
-GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+import base64
+from datetime import datetime
 
 # Set page configuration
 st.set_page_config(
-    page_title="Tele Script Generator",
+    page_title="Speridian Tele Script Generator",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Initialize Groq client
 def initialize_groq_client():
-    api_key = GROQ_API_KEY
-    if api_key:
+    try:
+        api_key = st.secrets.get("GROQ_API_KEY", "")
+        if not api_key:
+            st.error("GROQ_API_KEY not found in secrets. Please check your configuration.")
+            return None
         return Groq(api_key=api_key)
-    return None
+    except Exception as e:
+        st.error(f"Error initializing Groq client: {str(e)}")
+        return None
 
 # Function to generate report using Groq
 def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versatile"):
@@ -27,9 +33,10 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
     Generate a company analysis report using Groq AI model
     """
     try:
-        # Prepare the prompt with the row data
+        # Prepare the prompt with specific instructions
         prompt = f"""
         Please generate a comprehensive company analysis report in the exact following format based on the data provided below:
+
         [Prospect Name] - [Company Name]
 
         [Company Name] - Company Brief
@@ -38,7 +45,7 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
         Employees: [Employee Count]
         Revenue: [Revenue]
         Recent Initiatives:
-        [List recent initiatives]
+        • [List recent initiatives as bullet points, only include what's in the data]
 
         Technology Stack:
         Loan Origination & Servicing: [List systems]
@@ -46,15 +53,24 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
         Automation / AI: [AI/RPA tools]
         Compliance & Security: [Security systems]
 
-        Focus Areas: [List focus areas]
+        Focus Areas: [List the company's actual focus areas based on data, not recommendations]
 
-        Pain Points:
-        [List pain points]
+        Pain Points Relevant to [Prospect Name]:
+        • [Pain point 1 - be specific and reference the data]
+        • [Pain point 2 - be specific and reference the data]
+        • [Pain point 3 - be specific and reference the data]
+        • [Pain point 4 - be specific and reference the data]
+        • [Pain point 5 - be specific and reference the data]
+
+        IMPORTANT: 
+        - Use only the information provided in the data
+        - Do not make recommendations in the Focus Areas or Pain Points sections
+        - For Pain Points, be specific and reference the actual challenges the company faces based on the data
+        - Use bullet points for lists
+        - Keep the report professional and concise
 
         Here is the data to use:
         {json.dumps(row_data, indent=2)}
-
-        Ensure the report is professional, concise, and uses only the information provided.
         """
         
         # Create chat completion
@@ -66,7 +82,7 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
                 }
             ],
             model=model_name,
-            temperature=0.3,  # Lower temperature for more factual responses
+            temperature=0.2,  # Lower temperature for more factual responses
             max_tokens=4000,
         )
         
@@ -76,10 +92,22 @@ def generate_report_with_groq(client, row_data, model_name="llama-3.3-70b-versat
         st.error(f"Error generating report: {str(e)}")
         return None
 
+# Function to create a downloadable link
+def create_download_link(data, filename, file_type):
+    """Create a download link for the given data"""
+    if file_type == "csv":
+        data = data.to_csv(index=False)
+        b64 = base64.b64encode(data.encode()).decode()
+    else:
+        b64 = base64.b64encode(data.encode()).decode()
+    
+    href = f'<a href="data:file/{file_type};base64,{b64}" download="{filename}">Download {filename}</a>'
+    return href
+
 # Main application
 def main():
     st.title("Speridian Tele Script Generator")
-    st.markdown("Upload a CSV file ")
+    st.markdown("Upload a CSV file to generate comprehensive company analysis reports")
     
     # Initialize session state variables
     if 'df' not in st.session_state:
@@ -89,26 +117,33 @@ def main():
     if 'reports' not in st.session_state:
         st.session_state.reports = {}
     if 'groq_client' not in st.session_state:
-        st.session_state.groq_client = None
+        st.session_state.groq_client = initialize_groq_client()
     
-    # Sidebar for API key and file upload
+    # Sidebar for file upload
     with st.sidebar:
         st.header("Configuration")
-        st.session_state.groq_client = initialize_groq_client()
+        
+        if st.session_state.groq_client:
+            st.success("Groq API connected successfully")
+        else:
+            st.error(" Groq API not connected")
         
         st.divider()
         
         uploaded_file = st.file_uploader(
             "Upload CSV file", 
             type=['csv'],
-            help="Ensure your CSV contains the required columns for analysis"
+            help="Ensure your CSV contains columns like 'Company Name', 'Prospect Name', etc."
         )
         
         if uploaded_file is not None:
             try:
                 # Read the CSV file
                 st.session_state.df = pd.read_csv(uploaded_file)
-                st.success(f"Successfully uploaded {len(st.session_state.df)} records")
+                st.session_state.reports = {}  # Reset reports when new file is uploaded
+                st.session_state.current_index = 0  # Reset to first record
+                
+                st.success(f" Successfully uploaded {len(st.session_state.df)} records")
                 
                 # Show dataframe info
                 st.subheader("Data Preview")
@@ -119,17 +154,32 @@ def main():
     
     # Main content area
     if st.session_state.df is not None and st.session_state.groq_client is not None:
+        # Progress bar
+        progress_value = (st.session_state.current_index + 1) / len(st.session_state.df)
+        st.progress(progress_value, text=f"Progress: {st.session_state.current_index + 1} of {len(st.session_state.df)} records")
+        
         # Navigation controls
-        col1, col2, col3 = st.columns([1, 2, 1])
+        col1, col2, col3, col4 = st.columns([1, 2, 1, 1])
         with col1:
-            if st.button("◀ Previous") and st.session_state.current_index > 0:
+            if st.button("◀ Previous", disabled=st.session_state.current_index <= 0):
                 st.session_state.current_index -= 1
                 st.rerun()
         with col2:
             st.markdown(f"**Record {st.session_state.current_index + 1} of {len(st.session_state.df)}**")
         with col3:
-            if st.button("Next ▶") and st.session_state.current_index < len(st.session_state.df) - 1:
+            if st.button("Next ▶", disabled=st.session_state.current_index >= len(st.session_state.df) - 1):
                 st.session_state.current_index += 1
+                st.rerun()
+        with col4:
+            if st.button("Generate All", key="generate_all"):
+                with st.spinner(f"Generating {len(st.session_state.df)} reports. This may take a while..."):
+                    for idx in range(len(st.session_state.df)):
+                        if idx not in st.session_state.reports:
+                            row_dict = st.session_state.df.iloc[idx].to_dict()
+                            report = generate_report_with_groq(st.session_state.groq_client, row_dict)
+                            if report:
+                                st.session_state.reports[idx] = report
+                            time.sleep(1)  # Rate limiting
                 st.rerun()
         
         # Get current row data
@@ -139,6 +189,10 @@ def main():
         
         st.header(f"Analysis for: {company_name}")
         st.subheader(f"Prospect: {prospect_name}")
+        
+        # Display raw data
+        with st.expander("View Raw Data"):
+            st.json(current_row.to_dict())
         
         # Check if report already exists for this index
         if st.session_state.current_index not in st.session_state.reports:
@@ -163,39 +217,53 @@ def main():
         st.text_area(
             "Generated Report",
             report_text,
-            height=400,
+            height=500,
             key=f"report_{st.session_state.current_index}"
         )
         
-      
+        # Copy button
+        if st.button("Copy Report to Clipboard", key=f"copy_{st.session_state.current_index}"):
+            st.code(report_text, language="text")
+            st.success("Report copied to clipboard!")
         
-        
-        # Download all reports button
-        if st.button(" Download All Reports", key="download_all"):
-            # Create a combined report
-            all_reports = []
-            for idx in range(len(st.session_state.df)):
-                if idx in st.session_state.reports:
-                    all_reports.append(st.session_state.reports[idx])
-                else:
-                    all_reports.append("Report not generated yet")
-            
-            # Create a downloadable file
-            download_df = st.session_state.df.copy()
-            download_df['Generated_Report'] = all_reports
-            
-            # Convert to CSV
-            csv = download_df.to_csv(index=False)
+        # Download buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            # Download current report
             st.download_button(
-                label="Download CSV with Reports",
-                data=csv,
-                file_name="banking_analyses_with_reports.csv",
-                mime="text/csv",
-                key="download_csv"
+                label="Download Current Report",
+                data=report_text,
+                file_name=f"{company_name.replace(' ', '_')}_report.txt",
+                mime="text/plain"
             )
+        with col2:
+            # Download all reports
+            if len(st.session_state.reports) == len(st.session_state.df):
+                # Create a combined report
+                all_reports = []
+                for idx in range(len(st.session_state.df)):
+                    if idx in st.session_state.reports:
+                        all_reports.append(st.session_state.reports[idx])
+                
+                # Create a downloadable file
+                download_df = st.session_state.df.copy()
+                download_df['Generated_Report'] = all_reports
+                
+                # Convert to CSV
+                csv_data = download_df.to_csv(index=False)
+                st.download_button(
+                    label="Download All Reports as CSV",
+                    data=csv_data,
+                    file_name="company_analyses_with_reports.csv",
+                    mime="text/csv",
+                    key="download_csv"
+                )
+            else:
+                st.button("Download All Reports as CSV", disabled=True, 
+                         help="Generate all reports first to enable this feature")
     
     elif st.session_state.groq_client is None:
-        st.warning("Please enter your Groq API key in the sidebar to continue.")
+        st.warning("Please configure your Groq API key to continue.")
     
     elif st.session_state.df is None:
         st.info("Please upload a CSV file in the sidebar to get started.")
